@@ -55,9 +55,9 @@ class RequestHandler:
 
     def handle_request(self):
         request_data = self.request.recv(65535)
-        request_data = str(request_data)
+        # request_data = str(request_data)
 
-        for line in request_data.splitlines():
+        for line in request_data.split(b'\r\n'):
             print(str(line))
 
         self.request_parser = HttpRequestParser(request_data)
@@ -99,7 +99,8 @@ class RequestHandler:
     def start_response(self, status, headers, exc_info=None):
         if exc_info:
             try:
-            # do stuff w/exc_info here
+                # do stuff w/exc_info here
+                pass
             finally:
                 exc_info = None  # Avoid circular ref.
 
@@ -123,9 +124,12 @@ class HttpRequestParser:
     def _parse_request(self):
         request_line = self.request_data.splitlines()[0]
         self.method, self.url, self.version = request_line.split()
-        # print(self.method, self.path, self.version)
+        print(self.method, self.url, self.version)
+        self._parse_headers()
 
     def _parse_headers(self):
+        header_lines = self.request_data.splitlines()[1]
+        print('headers: {}'.format(header_lines))
 
 
     def get_http_method(self):
@@ -157,6 +161,9 @@ class HttpRequestParser:
 
     def get_header(self, header_name):
         pass
+
+    def _bytes_to_string(self, b):
+        return str(b)
 
 if __name__ == '__main__':
     server = WSGIServer('192.168.10.2', 1234)
