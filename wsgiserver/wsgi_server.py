@@ -115,7 +115,7 @@ class HttpRequestParser:
 
     def __init__(self, request_data):
         self.method = None
-        self.url = None
+        self.uri = None
         self.version = None
         self.headers = None
         self.request_data = request_data
@@ -123,24 +123,28 @@ class HttpRequestParser:
 
     def _parse_request(self):
         request_line = self.request_data.splitlines()[0]
-        self.method, self.url, self.version = request_line.split()
-        print(self.method, self.url, self.version)
+        self.method, self.uri, self.version = request_line.split()
+        print(self.method, self.uri, self.version)
         self._parse_headers()
 
     def _parse_headers(self):
-        header_lines = self.request_data.splitlines()[1]
-        print('headers: {}'.format(header_lines))
+        # header_lines = self.request_data.splitlines()[1]
+        header_lines = self.request_data.split(b'\r\n\r\n')[0]
+        headers = header_lines.splitlines()
+        for header in headers:
+            print('headers: {}'.format(str(header)))
 
 
     def get_http_method(self):
-        return self.method
+        return self._bytes_to_string(self.method)
 
     def get_http_path(self):
-        return self.url.split('?')[0]
+        path = self.uri.split(b'?')[0]
+        return self._bytes_to_string(path)
 
     def get_http_query_string(self):
-        if '?' in self.url:
-            return self.url.split('?')[1]
+        if b'?' in self.uri:
+            return self.uri.split(b'?')[1]
         else:
             return ''
 
@@ -165,6 +169,7 @@ class HttpRequestParser:
     def _bytes_to_string(self, b):
         return str(b)
 
+
 if __name__ == '__main__':
-    server = WSGIServer('192.168.10.2', 1234)
+    server = WSGIServer('0.0.0.0', 1234)
 
