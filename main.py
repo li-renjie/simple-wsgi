@@ -6,6 +6,15 @@ def run_application():
     server.handle_request()
 
 
+def run_simple_application():
+    from wsgiserver.wsgi_server import WSGIServer
+    from application.simple_app import application
+    server = WSGIServer('0.0.0.0', 1234)
+    server.set_app(application)
+    server.run_server()
+
+
 if __name__ == '__main__':
-    run_application()
+    # run_application()
+    run_simple_application()
 

@@ -1,5 +1,8 @@
 import socket
+import sys
+import os
 from threading import Thread
+from io import StringIO
 
 
 class WSGIServer:
@@ -12,7 +15,7 @@ class WSGIServer:
         self.host = host
         self.port = port
         self.socket = None
-        self.run_server()
+        # self.run_server()
 
     def run_server(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -42,7 +45,6 @@ class WSGIServer:
             self.socket.close()
 
 
-
 class RequestHandler:
     """Handle a request with WSGI."""
 
@@ -51,50 +53,54 @@ class RequestHandler:
         self.client_addr = client_addr
         self.application = application
         self.request_parser = None
+        self.env = dict(os.environ.items())
         self.handle_request()
 
     def handle_request(self):
-        request_data = self.request.recv(65535)
-        request_data = str(request_data, 'iso-8859-1')     #
+        request_raw_data = self.request.recv(65535)
+        request_data = str(request_raw_data, 'iso-8859-1')     #
 
         for line in request_data.split('\r\n'):
             print(line)
 
         self.request_parser = HttpRequestParser(request_data)
 
+        self.setup_environ()
         env = self.get_environ()
-        print(env)
+        #print(env)
 
+        print('socket info: {}'.format(dir(self.request)))
 
-    def get_environ(self):
+        result = self.application(self.env, self.start_response)
+        self.request.close()
+
+    def setup_environ(self):
         """
-        :return: env
         REF: https://www.python.org/dev/peps/pep-3333/#environ-variables
         """
 
-        env = {}
-
         # WSGI-defined variables
-        env['wsgi.version']       = (0, 1)
-        env['wsgi.url_scheme']    = 'http'      # http or https
-        env['wsgi.input']         = ''
-        env['wsgi.errors']        = ''
-        env['wsgi.multithread']   = True
-        env['wsgi.multiprocess']  = False
-        env['wsgi.run_once']      = False
+        self.env['wsgi.version']      = (0, 1)
+        self.env['wsgi.url_scheme']   = self.get_scheme()      # http or https
+        self.env['wsgi.input']        = StringIO('')
+        self.env['wsgi.errors']       = sys.stderr
+        self.env['wsgi.multithread']  = True
+        self.env['wsgi.multiprocess'] = False
+        self.env['wsgi.run_once']     = False
 
         # CGI environment variables
-        env['REQUEST_METHOD']     = self.request_parser.get_http_method()
-        env['SCRIPT_NAME']        = ''
-        env['PATH_INFO']          = self.request_parser.get_http_path()
-        env['QUERY_STRING']       = self.request_parser.get_http_query_string()
-        env['CONTENT_TYPE']       = self.request_parser.get_content_type()
-        env['CONTENT_LENGTH']     = self.request_parser.get_content_length()
-        env['SERVER_NAME']        = ''     # socket.getfqdn(host)
-        env['SERVER_PORT']        = ''
-        env['SERVER_PROTOCOL']    = self.request_parser.get_http_version()
+        self.env['REQUEST_METHOD']    = self.request_parser.get_http_method()
+        self.env['SCRIPT_NAME']       = ''
+        self.env['PATH_INFO']         = self.request_parser.get_http_path()
+        self.env['QUERY_STRING']      = self.request_parser.get_http_query_string()
+        self.env['CONTENT_TYPE']      = self.request_parser.get_content_type()
+        self.env['CONTENT_LENGTH']    = self.request_parser.get_content_length()
+        self.env['SERVER_PROTOCOL']   = self.request_parser.get_http_version()
+        self.env['SERVER_NAME']       = socket.getfqdn()
+        self.env['SERVER_PORT']       = self.request.getsockname()[1]
 
-        return env
+    def get_environ(self):
+        return self.env
 
     def start_response(self, status, headers, exc_info=None):
         if exc_info:
@@ -104,11 +110,19 @@ class RequestHandler:
             finally:
                 exc_info = None  # Avoid circular ref.
 
+        return self.write
+
     def write(self):
         pass
 
-    def finish_response(self):
+    def finish_response(self, result):
         pass
+
+    def get_scheme(self):
+        if self.env.get('HTTPS') in ('yes', 'on', 1):
+            return 'https'
+        else:
+            return 'http'
 
 
 class HttpRequestParser:
@@ -125,7 +139,6 @@ class HttpRequestParser:
     def _parse_request(self):
         request_line = self.request_data.splitlines()[0]
         self.method, self.uri, self.version = request_line.split()
-        # print(self.method, self.uri, self.version)
         self._parse_headers()
 
     def _parse_headers(self):
@@ -134,7 +147,6 @@ class HttpRequestParser:
         headers = header_lines.split('\r\n')[1:]
         for header in headers:
             name, value = header.split(': ')
-            print('name:{} value:{}'.format(name, value))
             self.headers[name] = value
 
     def get_http_method(self):
@@ -171,6 +183,9 @@ class HttpRequestParser:
             return ''
 
 
+class HttpResponse:
+    pass
+
+
 if __name__ == '__main__':
     server = WSGIServer('0.0.0.0', 1234)
-
