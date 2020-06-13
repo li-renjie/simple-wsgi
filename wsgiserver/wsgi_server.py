@@ -55,10 +55,10 @@ class RequestHandler:
 
     def handle_request(self):
         request_data = self.request.recv(65535)
-        # request_data = str(request_data)
+        request_data = str(request_data, 'iso-8859-1')     #
 
-        for line in request_data.split(b'\r\n'):
-            print(str(line))
+        for line in request_data.split('\r\n'):
+            print(line)
 
         self.request_parser = HttpRequestParser(request_data)
 
@@ -88,8 +88,8 @@ class RequestHandler:
         env['SCRIPT_NAME']        = ''
         env['PATH_INFO']          = self.request_parser.get_http_path()
         env['QUERY_STRING']       = self.request_parser.get_http_query_string()
-        env['CONTENT_TYPE']       = ''
-        env['CONTENT_LENGTH']     = ''
+        env['CONTENT_TYPE']       = self.request_parser.get_content_type()
+        env['CONTENT_LENGTH']     = self.request_parser.get_content_length()
         env['SERVER_NAME']        = ''     # socket.getfqdn(host)
         env['SERVER_PORT']        = ''
         env['SERVER_PROTOCOL']    = self.request_parser.get_http_version()
@@ -114,37 +114,38 @@ class RequestHandler:
 class HttpRequestParser:
 
     def __init__(self, request_data):
-        self.method = None
-        self.uri = None
-        self.version = None
-        self.headers = None
+        self.method = None       # GET
+        self.uri = None          # /abc?key=value
+        self.version = None      # HTTP/1.1
+        self.headers = {}
+        self.request_body = None
         self.request_data = request_data
         self._parse_request()
 
     def _parse_request(self):
         request_line = self.request_data.splitlines()[0]
         self.method, self.uri, self.version = request_line.split()
-        print(self.method, self.uri, self.version)
+        # print(self.method, self.uri, self.version)
         self._parse_headers()
 
     def _parse_headers(self):
         # header_lines = self.request_data.splitlines()[1]
-        header_lines = self.request_data.split(b'\r\n\r\n')[0]
-        headers = header_lines.splitlines()
+        header_lines, self.request_body = self.request_data.split('\r\n\r\n')
+        headers = header_lines.split('\r\n')[1:]
         for header in headers:
-            print('headers: {}'.format(str(header)))
-
+            name, value = header.split(': ')
+            print('name:{} value:{}'.format(name, value))
+            self.headers[name] = value
 
     def get_http_method(self):
-        return self._bytes_to_string(self.method)
+        return self.method
 
     def get_http_path(self):
-        path = self.uri.split(b'?')[0]
-        return self._bytes_to_string(path)
+        return self.uri.split('?')[0]
 
     def get_http_query_string(self):
-        if b'?' in self.uri:
-            return self.uri.split(b'?')[1]
+        if '?' in self.uri:
+            return self.uri.split('?')[1]
         else:
             return ''
 
@@ -152,22 +153,22 @@ class HttpRequestParser:
         return self.version
 
     def get_http_headers(self):
-        pass
+        return self.headers
 
     def get_http_data(self):
-        pass
+        return self.request_body
 
     def get_content_type(self):
-        pass
+        return self.get_header('Content-Type')
 
     def get_content_length(self):
-        pass
+        return self.get_header('Content-Length')
 
     def get_header(self, header_name):
-        pass
-
-    def _bytes_to_string(self, b):
-        return str(b)
+        if header_name in self.headers:
+            return self.headers[header_name]
+        else:
+            return ''
 
 
 if __name__ == '__main__':
