@@ -52,8 +52,11 @@ class RequestHandler:
         self.request = request
         self.client_addr = client_addr
         self.application = application
-        self.request_parser = None
         self.env = dict(os.environ.items())
+        self.request_parser = None
+        self.response_status = None
+        self.response_headers = []
+
         self.handle_request()
 
     def handle_request(self):
@@ -68,11 +71,10 @@ class RequestHandler:
         self.setup_environ()
         env = self.get_environ()
         #print(env)
-
-        print('socket info: {}'.format(dir(self.request)))
+        #print('socket info: {}'.format(dir(self.request)))
 
         result = self.application(self.env, self.start_response)
-        self.request.close()
+        self.finish_response()
 
     def setup_environ(self):
         """
@@ -82,7 +84,7 @@ class RequestHandler:
         # WSGI-defined variables
         self.env['wsgi.version']      = (0, 1)
         self.env['wsgi.url_scheme']   = self.get_scheme()      # http or https
-        self.env['wsgi.input']        = StringIO('')
+        self.env['wsgi.input']        = self.request.makefile(mode='rb')
         self.env['wsgi.errors']       = sys.stderr
         self.env['wsgi.multithread']  = True
         self.env['wsgi.multiprocess'] = False
@@ -99,24 +101,35 @@ class RequestHandler:
         self.env['SERVER_NAME']       = socket.getfqdn()
         self.env['SERVER_PORT']       = self.request.getsockname()[1]
 
+        # CGI HTTP_ Variables
+
     def get_environ(self):
         return self.env
 
     def start_response(self, status, headers, exc_info=None):
+        """start_response() callable as specified by PEP 3333
+        status: HTTP "status" string like "200 OK" or "404 Not Found".
+        headers: A list of (header_name, header_value) tuples.
+        exc_info: If supplied, must be a Python sys.exc_info() tuple.
+        """
+
         if exc_info:
             try:
-                # do stuff w/exc_info here
-                pass
+                raise (exc_info[0], exc_info[1], exc_info[2])
             finally:
                 exc_info = None  # Avoid circular ref.
 
+        self.response_status = status
+        self.response_headers = headers
         return self.write
 
-    def write(self):
-        pass
+    def write(self, data):
+        """write() callable as specified by PEP 3333
+
+        """
 
     def finish_response(self, result):
-        pass
+        self.request.close()
 
     def get_scheme(self):
         if self.env.get('HTTPS') in ('yes', 'on', 1):
@@ -181,10 +194,6 @@ class HttpRequestParser:
             return self.headers[header_name]
         else:
             return ''
-
-
-class HttpResponse:
-    pass
 
 
 if __name__ == '__main__':
