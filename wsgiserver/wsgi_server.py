@@ -56,7 +56,7 @@ class RequestHandler:
         self.request_parser = None
         self.response_status = None
         self.response_headers = []
-
+        self.response_headers_sent = False
         self.handle_request()
 
     def handle_request(self):
@@ -128,8 +128,18 @@ class RequestHandler:
 
         """
 
-    def finish_response(self, result):
+    def finish_response(self):
+        self.send_headers()
         self.request.close()
+
+    def send_headers(self):
+        if self.response_headers_sent:
+            return
+        version = 'HTTP/1.1'
+        status_line = '{} {}\r\n'.format(version, self.response_status)
+        self.request.send(status_line.encode('iso-8859-1'))
+        print(self.response_headers)
+        self.response_headers_sent = True
 
     def get_scheme(self):
         if self.env.get('HTTPS') in ('yes', 'on', 1):
