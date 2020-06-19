@@ -1,6 +1,7 @@
 import socket
 import sys
 import os
+import time
 from threading import Thread
 from io import StringIO
 
@@ -56,6 +57,7 @@ class RequestHandler:
         self.request_parser = None
         self.response_status = None
         self.response_headers = []
+        self.response_data = None
         self.response_headers_sent = False
         self.handle_request()
 
@@ -69,21 +71,19 @@ class RequestHandler:
         self.request_parser = HttpRequestParser(request_data)
 
         self.setup_environ()
-        env = self.get_environ()
-        #print(env)
-        #print('socket info: {}'.format(dir(self.request)))
-
-        result = self.application(self.env, self.start_response)
+        self.response_data = self.application(self.env, self.start_response)
         self.finish_response()
 
     def setup_environ(self):
-        """
+        """ Setup WSGI-defined variables and CGI environment variables.
+
         REF: https://www.python.org/dev/peps/pep-3333/#environ-variables
+
         """
 
         # WSGI-defined variables
         self.env['wsgi.version']      = (0, 1)
-        self.env['wsgi.url_scheme']   = self.get_scheme()      # http or https
+        self.env['wsgi.url_scheme']   = 'http'      # http or https
         self.env['wsgi.input']        = self.request.makefile(mode='rb')
         self.env['wsgi.errors']       = sys.stderr
         self.env['wsgi.multithread']  = True
@@ -102,17 +102,26 @@ class RequestHandler:
         self.env['SERVER_PORT']       = self.request.getsockname()[1]
 
         # CGI HTTP_ Variables
+        headers = self.request_parser.get_http_headers()
+        for name, value in headers.items():
+            name = name.upper().replace('-', '_')
+            value = value.strip()
+            env_name = 'HTTP_' + name
+            self.env[env_name] = value
 
     def get_environ(self):
         return self.env
 
     def start_response(self, status, headers, exc_info=None):
         """start_response() callable as specified by PEP 3333
-        status: HTTP "status" string like "200 OK" or "404 Not Found".
-        headers: A list of (header_name, header_value) tuples.
-        exc_info: If supplied, must be a Python sys.exc_info() tuple.
-        """
 
+        status: HTTP "status" string like "200 OK" or "404 Not Found".
+
+        headers: A list of (header_name, header_value) tuples.
+
+        exc_info: If supplied, must be a Python sys.exc_info() tuple.
+
+        """
         if exc_info:
             try:
                 raise (exc_info[0], exc_info[1], exc_info[2])
@@ -126,26 +135,45 @@ class RequestHandler:
     def write(self, data):
         """write() callable as specified by PEP 3333
 
+        New WSGI applications and frameworks should not use the write() callable
+        if it is possible to avoid doing so. The write() callable is strictly a
+        hack to support imperative streaming APIs.
+
         """
+        if type(data) is not bytes:
+            raise TypeError('write(data): data must be bytes.')
+
+        if not self.response_headers_sent:
+            raise AssertionError('write() before start_response()')
+
+        self.request.sendall(data)
 
     def finish_response(self):
         self.send_headers()
+
+        for data in self.response_data:
+            print(data)
+            self.write(data)       # self.request.send(data)
         self.request.close()
 
     def send_headers(self):
         if self.response_headers_sent:
             return
+
+        # send response status line
         version = 'HTTP/1.1'
         status_line = '{} {}\r\n'.format(version, self.response_status)
-        self.request.send(status_line.encode('iso-8859-1'))
-        print(self.response_headers)
-        self.response_headers_sent = True
+        self.request.sendall(status_line.encode('iso-8859-1'))
 
-    def get_scheme(self):
-        if self.env.get('HTTPS') in ('yes', 'on', 1):
-            return 'https'
-        else:
-            return 'http'
+        # send response headers
+        if 'Date' not in self.response_headers:
+            self.request.send('Date: {}\r\n'.format(time.time()).encode('iso-8859-1'))
+        for name, value in self.response_headers:
+            header_line = '{}: {}\r\n'.format(name, value)
+            self.request.sendall(header_line.encode('iso-8859-1'))
+        self.request.sendall('\r\n'.encode('iso-8859-1'))
+
+        self.response_headers_sent = True
 
 
 class HttpRequestParser:
@@ -165,12 +193,14 @@ class HttpRequestParser:
         self._parse_headers()
 
     def _parse_headers(self):
-        # header_lines = self.request_data.splitlines()[1]
         header_lines, self.request_body = self.request_data.split('\r\n\r\n')
         headers = header_lines.split('\r\n')[1:]
         for header in headers:
             name, value = header.split(': ')
-            self.headers[name] = value
+            if name in self.headers:
+                self.headers[name] = self.headers[name] + ',' + value
+            else:
+                self.headers[name] = value
 
     def get_http_method(self):
         return self.method
