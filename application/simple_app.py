@@ -4,7 +4,7 @@ def application(environ, start_response):
     resp_body = b'Hello, world!\n'
     status = '200 OK'
     resp_headers = [
-        ('Content-type', 'text/plain'),
+        ('Content-Type', 'text/plain'),
         ('Content-Length', str(len(resp_body)))
     ]
     start_response(status, resp_headers)
@@ -22,7 +22,7 @@ class Application:
         self.resp_body = b'Hello, world!\n'
         self.status = '200 OK'
         self.resp_headers = [
-            ('Content-type', 'text/plain'),
+            ('Content-Type', 'text/plain'),
             ('Content-Length', str(len(resp_body)))
         ]
 
@@ -37,7 +37,7 @@ class ApplicationCallable:
     resp_body = b'Hello, world!\n'
     status = '200 OK'
     resp_headers = [
-        ('Content-type', 'text/plain'),
+        ('Content-Type', 'text/plain'),
         ('Content-Length', str(len(resp_body)))
     ]
 

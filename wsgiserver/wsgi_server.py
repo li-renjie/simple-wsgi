@@ -1,9 +1,9 @@
 import socket
 import sys
 import os
-import time
 from threading import Thread
-from io import StringIO
+from io import BytesIO
+from datetime import datetime
 
 
 class WSGIServer:
@@ -22,11 +22,11 @@ class WSGIServer:
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.bind((self.host, self.port))
         self.socket.listen()
-        print('WSGIServer is listening at {}:{} ...'.format(self.host, self.port))
+        print('WSGIServer is listening at {}:{}...'.format(self.host, self.port))
 
         while True:
             connection, client_addr = self.socket.accept()
-            print('Receive a new connection, client addr {}'.format(client_addr))
+            print('Receive a new connection, client: {}'.format(client_addr))
             t = Thread(target=self.handle_connection, args=(connection, client_addr))
             t.setDaemon(True)
             self._threads.append(t)
@@ -54,6 +54,7 @@ class RequestHandler:
         self.client_addr = client_addr
         self.application = application
         self.env = dict(os.environ.items())
+        self.request_body_bytes = None
         self.request_parser = None
         self.response_status = None
         self.response_headers = []
@@ -63,12 +64,17 @@ class RequestHandler:
 
     def handle_request(self):
         request_raw_data = self.request.recv(65535)
+
+        # setup WSGI wsgi.input variable
+        splitted_data = request_raw_data.split(b'\r\n\r\n')
+        if len(splitted_data) >= 1:
+            self.request_body_bytes =
+
         request_data = str(request_raw_data, 'iso-8859-1')     #
+        self.request_parser = HttpRequestParser(request_data)
 
         for line in request_data.split('\r\n'):
             print(line)
-
-        self.request_parser = HttpRequestParser(request_data)
 
         self.setup_environ()
         self.response_data = self.application(self.env, self.start_response)
@@ -82,9 +88,13 @@ class RequestHandler:
         """
 
         # WSGI-defined variables
-        self.env['wsgi.version']      = (0, 1)
+        self.env['wsgi.version']      = (1, 0)      # WSGI version 1.0
         self.env['wsgi.url_scheme']   = 'http'      # http or https
-        self.env['wsgi.input']        = self.request.makefile(mode='rb')
+        # self.env['wsgi.input']        = self.request.makefile(mode='rb')
+        # self.env['wsgi.input']        = BytesIO(self.request_data)
+        self.env['wsgi.input']        = BytesIO(
+            self.request_parser.get_request_body().encode('iso-8859-1')
+        )
         self.env['wsgi.errors']       = sys.stderr
         self.env['wsgi.multithread']  = True
         self.env['wsgi.multiprocess'] = False
@@ -101,7 +111,7 @@ class RequestHandler:
         self.env['SERVER_NAME']       = socket.getfqdn()
         self.env['SERVER_PORT']       = self.request.getsockname()[1]
 
-        # CGI HTTP_ Variables
+        # CGI HTTP_* Variables
         headers = self.request_parser.get_http_headers()
         for name, value in headers.items():
             name = name.upper().replace('-', '_')
@@ -135,9 +145,9 @@ class RequestHandler:
     def write(self, data):
         """write() callable as specified by PEP 3333
 
-        New WSGI applications and frameworks should not use the write() callable
-        if it is possible to avoid doing so. The write() callable is strictly a
-        hack to support imperative streaming APIs.
+        New WSGI applications and frameworks should not use the write()
+        callable if it is possible to avoid doing so. The write() callable
+        is strictly a hack to support imperative streaming APIs.
 
         """
         if type(data) is not bytes:
@@ -167,7 +177,9 @@ class RequestHandler:
 
         # send response headers
         if 'Date' not in self.response_headers:
-            self.request.send('Date: {}\r\n'.format(time.time()).encode('iso-8859-1'))
+            dt = datetime.utcnow()
+            time_str = dt.strftime('%a, %d %b %Y %H:%M:%S GMT')
+            self.request.send('Date: {}\r\n'.format(time_str).encode('iso-8859-1'))
         for name, value in self.response_headers:
             header_line = '{}: {}\r\n'.format(name, value)
             self.request.sendall(header_line.encode('iso-8859-1'))
@@ -220,7 +232,7 @@ class HttpRequestParser:
     def get_http_headers(self):
         return self.headers
 
-    def get_http_data(self):
+    def get_request_body(self):
         return self.request_body
 
     def get_content_type(self):
