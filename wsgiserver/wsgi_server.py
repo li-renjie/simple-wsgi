@@ -1,6 +1,7 @@
 import socket
 import sys
 import os
+import traceback
 from threading import Thread
 from io import BytesIO
 from datetime import datetime
@@ -16,7 +17,6 @@ class WSGIServer:
         self.host = host
         self.port = port
         self.socket = None
-        # self.run_server()
 
     def run_server(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -41,6 +41,9 @@ class WSGIServer:
     def get_app(self):
         return self.application
 
+    def get_threads(self):
+        return self._threads
+
     def close(self):
         if self.socket:
             self.socket.close()
@@ -56,21 +59,30 @@ class RequestHandler:
         self.env = dict(os.environ.items())
         self.request_body_bytes = None
         self.request_parser = None
+
         self.response_status = None
         self.response_headers = []
         self.response_data = None
         self.response_headers_sent = False
+
+        self.error_status = '500 Internal Server Error'
+        self.error_headers = [('Content-Type','text/plain')]
+        self.error_body = b'An error occurred!'
+
         self.handle_request()
 
     def handle_request(self):
         request_raw_data = self.request.recv(65535)
 
-        # setup WSGI wsgi.input variable
-        splitted_data = request_raw_data.split(b'\r\n\r\n')
-        if len(splitted_data) >= 1:
-            self.request_body_bytes =
+        try:
+            data_list = request_raw_data.split(b'\r\n\r\n', 1)
+            self.request_body_bytes = data_list[1]
+        except Exception:
+            self.handle_error()
+            traceback.print_exc()
+            return
 
-        request_data = str(request_raw_data, 'iso-8859-1')     #
+        request_data = str(request_raw_data, 'iso-8859-1')
         self.request_parser = HttpRequestParser(request_data)
 
         for line in request_data.split('\r\n'):
@@ -84,35 +96,31 @@ class RequestHandler:
         """ Setup WSGI-defined variables and CGI environment variables.
 
         REF: https://www.python.org/dev/peps/pep-3333/#environ-variables
-
         """
-
         # WSGI-defined variables
         self.env['wsgi.version']      = (1, 0)      # WSGI version 1.0
         self.env['wsgi.url_scheme']   = 'http'      # http or https
-        # self.env['wsgi.input']        = self.request.makefile(mode='rb')
-        # self.env['wsgi.input']        = BytesIO(self.request_data)
-        self.env['wsgi.input']        = BytesIO(
-            self.request_parser.get_request_body().encode('iso-8859-1')
-        )
+        # An input stream (file-like object) from which the HTTP request body bytes can be read.
+        self.env['wsgi.input']        = BytesIO(self.request_body_bytes)
+        # An output stream (file-like object) to which error output can be written.
         self.env['wsgi.errors']       = sys.stderr
         self.env['wsgi.multithread']  = True
         self.env['wsgi.multiprocess'] = False
         self.env['wsgi.run_once']     = False
 
         # CGI environment variables
-        self.env['REQUEST_METHOD']    = self.request_parser.get_http_method()
+        self.env['REQUEST_METHOD']    = self.request_parser.get_method()
         self.env['SCRIPT_NAME']       = ''
-        self.env['PATH_INFO']         = self.request_parser.get_http_path()
-        self.env['QUERY_STRING']      = self.request_parser.get_http_query_string()
+        self.env['PATH_INFO']         = self.request_parser.get_path()
+        self.env['QUERY_STRING']      = self.request_parser.get_query_string()
         self.env['CONTENT_TYPE']      = self.request_parser.get_content_type()
         self.env['CONTENT_LENGTH']    = self.request_parser.get_content_length()
-        self.env['SERVER_PROTOCOL']   = self.request_parser.get_http_version()
+        self.env['SERVER_PROTOCOL']   = self.request_parser.get_version()
         self.env['SERVER_NAME']       = socket.getfqdn()
-        self.env['SERVER_PORT']       = self.request.getsockname()[1]
+        self.env['SERVER_PORT']       = str(self.request.getsockname()[1])
 
         # CGI HTTP_* Variables
-        headers = self.request_parser.get_http_headers()
+        headers = self.request_parser.get_headers()
         for name, value in headers.items():
             name = name.upper().replace('-', '_')
             value = value.strip()
@@ -130,7 +138,6 @@ class RequestHandler:
         headers: A list of (header_name, header_value) tuples.
 
         exc_info: If supplied, must be a Python sys.exc_info() tuple.
-
         """
         if exc_info:
             try:
@@ -148,7 +155,6 @@ class RequestHandler:
         New WSGI applications and frameworks should not use the write()
         callable if it is possible to avoid doing so. The write() callable
         is strictly a hack to support imperative streaming APIs.
-
         """
         if type(data) is not bytes:
             raise TypeError('write(data): data must be bytes.')
@@ -162,7 +168,6 @@ class RequestHandler:
         self.send_headers()
 
         for data in self.response_data:
-            print(data)
             self.write(data)       # self.request.send(data)
         self.request.close()
 
@@ -187,6 +192,15 @@ class RequestHandler:
 
         self.response_headers_sent = True
 
+    def handle_error(self):
+        self.response_data = self.error_handle_app(self.env, self.start_response)
+        self.finish_response()
+
+    def error_handle_app(self, environ, start_response):
+        """A WSGI application for handling errors."""
+        start_response(self.error_status, self.error_headers)
+        return [self.error_body]
+
 
 class HttpRequestParser:
 
@@ -205,7 +219,9 @@ class HttpRequestParser:
         self._parse_headers()
 
     def _parse_headers(self):
-        header_lines, self.request_body = self.request_data.split('\r\n\r\n')
+        data_list = self.request_data.split('\r\n\r\n', 1)
+        header_lines, self.request_body = data_list[:]
+
         headers = header_lines.split('\r\n')[1:]
         for header in headers:
             name, value = header.split(': ')
@@ -214,22 +230,22 @@ class HttpRequestParser:
             else:
                 self.headers[name] = value
 
-    def get_http_method(self):
+    def get_method(self):
         return self.method
 
-    def get_http_path(self):
+    def get_path(self):
         return self.uri.split('?')[0]
 
-    def get_http_query_string(self):
+    def get_query_string(self):
         if '?' in self.uri:
             return self.uri.split('?')[1]
         else:
             return ''
 
-    def get_http_version(self):
+    def get_version(self):
         return self.version
 
-    def get_http_headers(self):
+    def get_headers(self):
         return self.headers
 
     def get_request_body(self):
@@ -246,7 +262,3 @@ class HttpRequestParser:
             return self.headers[header_name]
         else:
             return ''
-
-
-if __name__ == '__main__':
-    server = WSGIServer('0.0.0.0', 1234)

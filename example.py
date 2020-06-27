@@ -32,13 +32,10 @@ def run_flask_application():
     @app.route('/post', methods=['GET', 'POST'])
     def post():
         if request.method == 'POST':
-            return str(request.json)
-            #return request.get_data(as_text=True)
+            # return str(request.json)
+            return request.get_data(as_text=True)
         else:
             return ''
-
-    from werkzeug.middleware.lint import LintMiddleware
-    app = LintMiddleware(app)
 
     server = WSGIServer('0.0.0.0', 1234)
     server.set_app(app)

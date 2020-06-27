@@ -12,9 +12,7 @@ def application(environ, start_response):
 
 
 class Application:
-    """A simple application Class.
-    app = Application(environ, start_response)
-    """
+    """A simple application Class."""
 
     def __init__(self, environ, start_response):
         self.environ = environ
@@ -32,7 +30,6 @@ class Application:
 
 
 class ApplicationCallable:
-    """"""
 
     resp_body = b'Hello, world!\n'
     status = '200 OK'
