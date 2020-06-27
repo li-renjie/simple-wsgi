@@ -1,4 +1,2 @@
 
-
-class Application:
-    pass
+# TODO: Implement a simple application framework.
